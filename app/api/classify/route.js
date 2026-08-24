@@ -39,6 +39,28 @@ export const maxDuration = 60;
 
 const CONCURRENCY = 2;
 
+// Hard ceiling for ONE hashtag's ENTIRE resolution — matchSegment()'s free-tier
+// lookup chain (exact, brand, several sequential stem-variant queries,
+// abbreviation, up to a 20s compound-split search, abbreviation-peeling) PLUS
+// the AI research step, combined. Must stay safely under maxDuration (60s).
+// Previously only the AI research step had its own budget
+// (RESEARCH_DEADLINE_MS in claudeResearch.js) — that's necessary but not
+// sufficient: matchSegment() has no ceiling of its own, so a hashtag that
+// grinds through several slow (but not technically failing) sheet lookups
+// before ever reaching research could still push the total past 60s even
+// with a conservative research budget. This wraps the whole thing in one
+// deadline, and hands whatever's left of it to research dynamically instead
+// of always spending a fixed amount regardless of how much matching already used.
+const HASHTAG_TIMEOUT_MS = 50000;
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`"${label}" exceeded its ${ms / 1000}s time budget`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function mapWithConcurrency(items, limit, fn) {
   const results = new Array(items.length);
   let nextIndex = 0;
@@ -63,31 +85,39 @@ async function mapWithConcurrency(items, limit, fn) {
 // an Anthropic API error that survived its own internal retries, etc.)
 // can't take down the whole batch or leave the request hanging — it becomes
 // its own reviewable "error" row instead.
+async function resolveHashtagInner(hashtag, useResearch, deadlineAt) {
+  const segment = hashtag.replace(/^#/, "");
+  const match = await matchSegment(segment);
+
+  if (match.status !== "needs_research") {
+    return [{ hashtag, ...match }];
+  }
+
+  const rows = [];
+  // A known abbreviation may already have been peeled off deterministically
+  // (see matcher.js's tryPeelAbbreviation) — if so, keep that confirmed
+  // part as its own row and only research the smaller leftover text,
+  // instead of letting the AI re-guess the whole original string.
+  if (match.partialMatches && match.partialMatches.length > 0) {
+    rows.push({ hashtag, status: "segmented", segment: match.segment, matches: match.partialMatches, notes: [] });
+  }
+  const researchTarget = match.researchSegment || segment;
+  if (useResearch) {
+    // Whatever's left of this hashtag's overall budget after matchSegment
+    // already spent some of it — not a fresh fixed amount every time.
+    const remainingMs = Math.max(deadlineAt - Date.now(), 3000);
+    const research = await researchNewEntity(researchTarget, hashtag, remainingMs);
+    rows.push({ hashtag, ...match, research });
+  } else {
+    rows.push({ hashtag, ...match });
+  }
+  return rows;
+}
+
 async function resolveHashtag(hashtag, useResearch) {
+  const deadlineAt = Date.now() + HASHTAG_TIMEOUT_MS;
   try {
-    const segment = hashtag.replace(/^#/, "");
-    const match = await matchSegment(segment);
-
-    if (match.status !== "needs_research") {
-      return [{ hashtag, ...match }];
-    }
-
-    const rows = [];
-    // A known abbreviation may already have been peeled off deterministically
-    // (see matcher.js's tryPeelAbbreviation) — if so, keep that confirmed
-    // part as its own row and only research the smaller leftover text,
-    // instead of letting the AI re-guess the whole original string.
-    if (match.partialMatches && match.partialMatches.length > 0) {
-      rows.push({ hashtag, status: "segmented", segment: match.segment, matches: match.partialMatches, notes: [] });
-    }
-    const researchTarget = match.researchSegment || segment;
-    if (useResearch) {
-      const research = await researchNewEntity(researchTarget, hashtag);
-      rows.push({ hashtag, ...match, research });
-    } else {
-      rows.push({ hashtag, ...match });
-    }
-    return rows;
+    return await withTimeout(resolveHashtagInner(hashtag, useResearch, deadlineAt), HASHTAG_TIMEOUT_MS, hashtag);
   } catch (err) {
     // Log the real error server-side (terminal running `npm run dev`, or the
     // hosting provider's function logs) — the UI only ever shows a short
