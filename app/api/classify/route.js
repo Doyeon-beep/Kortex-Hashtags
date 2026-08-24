@@ -25,6 +25,18 @@ import { reconcileConsistency } from "../../../lib/consistency";
 // wait time), not faster. Lowered to 2 now as a more conservative default —
 // raise it again once actual account limits are confirmed (check the Claude
 // Console's rate-limit tab, or watch the server logs for "status 429").
+// Without this, Vercel enforces its platform default duration limit (short —
+// well under a minute on Hobby), which silently kills this function long
+// before any of the internal timeouts below (claudeResearch.js's
+// RESEARCH_DEADLINE_MS, sheetQuery.js's GVIZ_TIMEOUT_MS) ever get a chance to
+// fire. That mismatch — not the internal timeouts themselves — was the actual
+// cause of "Failed to fetch" on every hashtag that needed AI research: the
+// connection was severed by the platform mid-request, so the browser never
+// got a real HTTP response to show a proper error for.
+// 60 is Hobby's historical safe ceiling; raise this only after confirming a
+// higher one in the Vercel dashboard (Project Settings -> Functions).
+export const maxDuration = 60;
+
 const CONCURRENCY = 2;
 
 async function mapWithConcurrency(items, limit, fn) {

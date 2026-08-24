@@ -223,7 +223,9 @@ export default function Home() {
           // keep going with the remaining batches instead of stopping dead.
           anyBatchFailed = true;
           const message =
-            err?.name === "AbortError" ? "Timed out after 3 min — try again" : err?.message || "Request failed";
+            err?.name === "AbortError"
+              ? `Timed out after ${BATCH_TIMEOUT_MS / 60000} min — try again`
+              : err?.message || "Request failed";
           for (const raw of batch) {
             allResults.push({ hashtag: raw, status: "error", error: message, notes: [] });
           }
