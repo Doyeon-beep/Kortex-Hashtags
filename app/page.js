@@ -73,9 +73,10 @@ function defaultBatchName(entry) {
   });
 }
 
-// A short, soft two-note chime (synthesized in-browser via Web Audio — no
-// audio file to bundle/host) played once Classify finishes, so a long batch
-// doesn't require staring at the tab to know when it's done.
+// A short, soft three-note ascending chime (synthesized in-browser via Web
+// Audio — no audio file to bundle/host) played once Classify finishes, so a
+// long batch doesn't require staring at the tab to know when it's done. A
+// rising G5-B5-D6 major arpeggio, ~1s total — a classic pleasant "done" sound.
 function playCompletionChime() {
   if (typeof window === "undefined") return;
   try {
@@ -84,8 +85,9 @@ function playCompletionChime() {
     const ctx = new AudioContextClass();
     const now = ctx.currentTime;
     const notes = [
-      { freq: 784.0, start: 0, duration: 0.16 }, // G5
-      { freq: 1046.5, start: 0.1, duration: 0.24 }, // C6
+      { freq: 784.0, start: 0, duration: 0.4 }, // G5
+      { freq: 987.77, start: 0.2, duration: 0.4 }, // B5
+      { freq: 1174.66, start: 0.4, duration: 0.6 }, // D6
     ];
     notes.forEach(({ freq, start, duration }) => {
       const osc = ctx.createOscillator();
@@ -181,6 +183,25 @@ export default function Home() {
   // for a truly dead connection (not to police normal slow-but-working AI
   // research, which is now bounded elsewhere).
   const BATCH_TIMEOUT_MS = 300000; // 5 min per batch of up to BATCH_SIZE hashtags
+
+  // Clears the current input/results back to the initial empty view — lets
+  // someone running several batches back-to-back start each one from a
+  // clean screen, so a finished batch's results can't be mistaken for
+  // leftovers from the previous run. Nothing is actually deleted: past
+  // batches are already saved in History regardless of this. Disabled while
+  // a batch is in flight (see the `disabled` prop below) since clearing
+  // `progress` mid-run would make the progress bar jump back to 0% while a
+  // batch is still genuinely running.
+  function resetToHome() {
+    setInput("");
+    setRows([]);
+    setEditedFlags([]);
+    setFlags([]);
+    setClassifyError(null);
+    setShowNewOnly(false);
+    setCurrentHistoryId(null);
+    setProgress({ done: 0, total: 0 });
+  }
 
   async function handleClassify() {
     const hashtags = input
@@ -366,9 +387,19 @@ export default function Home() {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="mark">#</div>
+        <button
+          type="button"
+          className="mark mark-button"
+          onClick={resetToHome}
+          disabled={loading}
+          title="Start a new batch"
+        >
+          #
+        </button>
         <div>
-          <h1 className="page-title">Hashtag Classifier</h1>
+          <h1 className="page-title page-title-button" onClick={loading ? undefined : resetToHome} title="Start a new batch">
+            Hashtag Classifier
+          </h1>
           <p className="page-subtitle">Classify TikTok hashtags against the moria taxonomy sheet.</p>
         </div>
       </div>

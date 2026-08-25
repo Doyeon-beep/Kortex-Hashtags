@@ -56,6 +56,23 @@ body {
   flex-shrink: 0;
 }
 
+.mark-button {
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.mark-button:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.mark-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .page-title {
   font-family: var(--font-display);
   font-size: 32px;
@@ -63,6 +80,15 @@ body {
   margin: 0;
   letter-spacing: -0.01em;
   color: var(--text);
+}
+
+.page-title-button {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.page-title-button:hover {
+  opacity: 0.75;
 }
 
 .page-subtitle {
