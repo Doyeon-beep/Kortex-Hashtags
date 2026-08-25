@@ -526,6 +526,7 @@ table.grid td:last-child {
 
 .history-name-input {
   border: none;
+  border-bottom: 1px dashed var(--border);
   background: transparent;
   font-size: 16px;
   font-weight: 600;
@@ -533,11 +534,13 @@ table.grid td:last-child {
   padding: 2px 4px;
   border-radius: 4px;
   width: 220px;
+  cursor: text;
 }
 
 .history-name-input:hover,
 .history-name-input:focus {
   background: var(--lavender-wash);
+  border-bottom-color: transparent;
   outline: none;
 }
 

@@ -314,11 +314,6 @@ export default function Home() {
     });
   }
 
-  function addRow() {
-    setRows((prev) => [...prev, HEADER.map(() => "")]);
-    setEditedFlags((prev) => [...prev, false]);
-  }
-
   function deleteRow(rowIndex) {
     setRows((prev) => prev.filter((_, i) => i !== rowIndex));
     setEditedFlags((prev) => prev.filter((_, i) => i !== rowIndex));
@@ -428,9 +423,6 @@ export default function Home() {
               </button>
               <button className="btn" onClick={handleExport}>
                 Export to Excel
-              </button>
-              <button className="btn" onClick={addRow}>
-                + Add row
               </button>
             </>
           )}

@@ -114,7 +114,18 @@ async function resolveHashtagInner(hashtag, useResearch, deadlineAt) {
   return rows;
 }
 
+// A well-formed hashtag: exactly one "#", at the very start, and no commas
+// or periods anywhere in it. Checked before any matching/research work
+// starts — an input that doesn't even look like a hashtag isn't something
+// matching or AI research should try to interpret, it's just a formatting
+// mistake to flag back to whoever pasted it in.
+const HASHTAG_FORMAT_RE = /^#[^#,.]+$/;
+
 async function resolveHashtag(hashtag, useResearch) {
+  if (!HASHTAG_FORMAT_RE.test(hashtag)) {
+    return [{ hashtag, status: "invalid_format", notes: [] }];
+  }
+
   const deadlineAt = Date.now() + HASHTAG_TIMEOUT_MS;
   try {
     return await withTimeout(resolveHashtagInner(hashtag, useResearch, deadlineAt), HASHTAG_TIMEOUT_MS, hashtag);
