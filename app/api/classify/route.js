@@ -33,25 +33,22 @@ import { reconcileConsistency } from "../../../lib/consistency";
 // cause of "Failed to fetch" on every hashtag that needed AI research: the
 // connection was severed by the platform mid-request, so the browser never
 // got a real HTTP response to show a proper error for.
-// 60 is Hobby's historical safe ceiling; raise this only after confirming a
-// higher one in the Vercel dashboard (Project Settings -> Functions).
-export const maxDuration = 60;
+// 300s is Vercel Pro's standard ceiling without needing Fluid Compute
+// specifically enabled (Hobby's was 60s — this project moved to a Pro team
+// account). If Fluid Compute is confirmed on for this project, this can go
+// higher (up to 800s), but 300 is the safe assumption either way.
+export const maxDuration = 300;
 
 const CONCURRENCY = 2;
 
 // Hard ceiling for ONE hashtag's ENTIRE resolution — matchSegment()'s free-tier
-// lookup chain (exact, brand, several sequential stem-variant queries,
-// abbreviation, up to a 20s compound-split search, abbreviation-peeling) PLUS
-// the AI research step, combined. Must stay safely under maxDuration (60s).
-// Previously only the AI research step had its own budget
-// (RESEARCH_DEADLINE_MS in claudeResearch.js) — that's necessary but not
-// sufficient: matchSegment() has no ceiling of its own, so a hashtag that
-// grinds through several slow (but not technically failing) sheet lookups
-// before ever reaching research could still push the total past 60s even
-// with a conservative research budget. This wraps the whole thing in one
-// deadline, and hands whatever's left of it to research dynamically instead
-// of always spending a fixed amount regardless of how much matching already used.
-const HASHTAG_TIMEOUT_MS = 50000;
+// lookup chain PLUS the AI research step, combined. Must stay safely under
+// maxDuration (300s) — kept well below it since two hashtags run concurrently
+// per request (CONCURRENCY below) and route.js still needs time to reconcile
+// and serialize the response after both finish. Hands whatever's left of this
+// budget to research dynamically instead of always spending a fixed amount
+// regardless of how much matching already used.
+const HASHTAG_TIMEOUT_MS = 280000;
 
 function withTimeout(promise, ms, label) {
   let timer;

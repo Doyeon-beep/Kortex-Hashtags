@@ -171,18 +171,15 @@ export default function Home() {
   // This went through a few bad guesses (3 min, then 10 min, then 30 min)
   // trying to size it for "however many hashtags happen to need AI research
   // this time" — which never works, since that number keeps changing as
-  // batch sizes grow. The actual fix was lib/claudeResearch.js's
-  // RESEARCH_DEADLINE_MS: each individual hashtag's AI research is now
-  // hard-capped at 2 minutes server-side (covering all its turns AND
-  // retries), so a batch of BATCH_SIZE hashtags running CONCURRENCY at a
-  // time can never legitimately take much longer than
-  // ceil(BATCH_SIZE / CONCURRENCY) * ~2 min. With BATCH_SIZE = CONCURRENCY =
-  // 2, that's ~2 min per request, regardless of whether the whole submission
-  // is 10 or 300 hashtags — this timeout can now be a real, confident number
-  // instead of an ever-growing guess, and only exists as a last-resort net
-  // for a truly dead connection (not to police normal slow-but-working AI
-  // research, which is now bounded elsewhere).
-  const BATCH_TIMEOUT_MS = 300000; // 5 min per batch of up to BATCH_SIZE hashtags
+  // batch sizes grow. The actual fix was route.js's HASHTAG_TIMEOUT_MS: each
+  // individual hashtag's matching + AI research combined is hard-capped
+  // server-side (280s on this project's Pro plan, well under its 300s
+  // maxDuration), so a batch of BATCH_SIZE hashtags running CONCURRENCY at a
+  // time can never legitimately take much longer than that same ceiling. This
+  // timeout only exists as a last-resort net for a truly dead connection —
+  // kept a bit above the server's own budget so it doesn't fire while the
+  // server is still legitimately finishing up and about to respond.
+  const BATCH_TIMEOUT_MS = 320000; // a bit over route.js's 280s per-hashtag budget
 
   // Clears the current input/results back to the initial empty view — lets
   // someone running several batches back-to-back start each one from a
