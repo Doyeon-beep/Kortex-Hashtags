@@ -56,7 +56,7 @@ export async function POST(request) {
   try {
     const [batch] = await sql`
       insert into batches (created_by, name, hashtag_count, flags)
-      values (${createdBy}, ${name}, ${rows.length}, ${sql.json(flags)})
+      values (${createdBy}, ${name}, ${rows.length}, ${JSON.stringify(flags)}::jsonb)
       returning id, created_at, created_by, name, hashtag_count, flags
     `;
 
