@@ -177,6 +177,17 @@ export default function Home() {
         // Best-effort — the classify results themselves are already shown;
         // losing a save just means this edit isn't reflected for teammates.
       });
+      // The History list's mistake/accuracy badges were captured once at
+      // create time and otherwise never refreshed, so they'd silently go
+      // stale the moment someone edited a cell - update the matching entry
+      // locally instead of waiting for a manual History reopen/refetch.
+      setHistory((prev) =>
+        prev.map((e) =>
+          e.id === currentHistoryId
+            ? { ...e, row_count: rows.length, mistake_count: editedFlags.filter(Boolean).length }
+            : e
+        )
+      );
     }, 800);
     return () => clearTimeout(saveTimerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
