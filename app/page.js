@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { HEADER, resultsToRows } from "../lib/exportRows";
 import { reconcileConsistency } from "../lib/consistency";
 
-const HISTORY_KEY = "hashtagClassifierHistory";
-const HISTORY_LIMIT = 50;
+const REVIEWER_NAME_KEY = "kortexReviewerName";
 const NEW_COL_INDEX = 9; // HEADER = [cat1,cat2,cat3,cat4,cat5,brand,product line,hashtag,inclusion,new,comments]
 const INCLUSION_COL_INDEX = 8;
 const HASHTAG_COL_INDEX = 7;
@@ -33,38 +32,32 @@ function isNewRow(row) {
   return Boolean(row[NEW_COL_INDEX]);
 }
 
-function loadHistory() {
-  if (typeof window === "undefined") return [];
+function loadReviewerName() {
+  if (typeof window === "undefined") return "";
   try {
-    const raw = window.localStorage.getItem(HISTORY_KEY);
-    return raw ? JSON.parse(raw) : [];
+    return window.localStorage.getItem(REVIEWER_NAME_KEY) || "";
   } catch {
-    return [];
+    return "";
   }
 }
 
-function saveHistory(entries) {
+function saveReviewerNameToBrowser(name) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(HISTORY_KEY, JSON.stringify(entries));
+    window.localStorage.setItem(REVIEWER_NAME_KEY, name);
   } catch {
-    // ignore quota errors — history is a convenience, not critical data
+    // ignore — worst case, asked again next visit
   }
-}
-
-function entryMistakeCount(entry) {
-  return Array.isArray(entry.editedFlags) ? entry.editedFlags.filter(Boolean).length : 0;
 }
 
 function entryAccuracy(entry) {
-  const total = Array.isArray(entry.rows) ? entry.rows.length : 0;
+  const total = entry.row_count || 0;
   if (total === 0) return null;
-  const mistakes = entryMistakeCount(entry);
-  return Math.round(((total - mistakes) / total) * 100);
+  return Math.round(((total - (entry.mistake_count || 0)) / total) * 100);
 }
 
 function defaultBatchName(entry) {
-  const d = new Date(entry.timestamp);
+  const d = new Date(entry.created_at);
   return d.toLocaleString("en-US", {
     month: "short",
     day: "numeric",
@@ -134,32 +127,60 @@ export default function Home() {
   const [copied, setCopied] = useState(false);
   const [showNewOnly, setShowNewOnly] = useState(false);
   const [history, setHistory] = useState([]);
+  const [historyScope, setHistoryScope] = useState("all"); // "all" | "mine"
   const [showHistory, setShowHistory] = useState(false);
   const [currentHistoryId, setCurrentHistoryId] = useState(null); // which history entry the current view is tied to
+  const [reviewerName, setReviewerName] = useState(null); // null = not loaded yet, "" = needs to be asked
+  const [nameDraft, setNameDraft] = useState("");
+  const saveTimerRef = useRef(null);
 
+  // Every batch is attributed to a reviewer name so History/Data Quality can
+  // be shared across the team instead of trapped in one person's browser —
+  // no real login, just a name saved to this browser (same pattern as the
+  // sibling Kortex tools).
   useEffect(() => {
-    setHistory(loadHistory());
+    setReviewerName(loadReviewerName());
   }, []);
 
-  // Keep the current batch's history entry in sync with every edit (cell edits,
-  // add/delete row) so mistakes/accuracy survive switching to History and back,
-  // or reloading the page — not just the state at the moment Classify finished.
+  async function fetchHistory(scope) {
+    try {
+      const url = scope === "mine" && reviewerName ? `/api/batches?reviewer=${encodeURIComponent(reviewerName)}` : "/api/batches";
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      setHistory(data.batches || []);
+    } catch {
+      // History is a convenience view — a failed fetch just leaves the
+      // current list stale, it shouldn't interrupt anything else.
+    }
+  }
+
+  useEffect(() => {
+    if (reviewerName) fetchHistory(historyScope);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewerName, historyScope]);
+
+  // Keep the current batch's saved row data in sync with every edit (cell
+  // edits, row deletes) so mistakes/accuracy survive switching to History and
+  // back, or a teammate loading it later — not just the state at the moment
+  // Classify finished. Debounced so a fast typist doesn't fire a write per
+  // keystroke; only the LATEST state after a pause gets persisted.
   useEffect(() => {
     if (currentHistoryId == null) return;
-    setHistory((prev) => {
-      const idx = prev.findIndex((e) => e.id === currentHistoryId);
-      if (idx === -1) return prev;
-      const existing = prev[idx];
-      if (existing.rows === rows && existing.editedFlags === editedFlags && existing.flags === flags) {
-        return prev; // nothing actually changed — avoid a redundant write/render
-      }
-      const next = [...prev];
-      next[idx] = { ...existing, rows, editedFlags, flags, count: rows.length };
-      saveHistory(next);
-      return next;
-    });
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      fetch(`/api/batches/${currentHistoryId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows, editedFlags }),
+      }).catch(() => {
+        // Best-effort — the classify results themselves are already shown;
+        // losing a save just means this edit isn't reflected for teammates.
+      });
+    }, 800);
+    return () => clearTimeout(saveTimerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, editedFlags, flags, currentHistoryId]);
+  }, [rows, editedFlags, currentHistoryId]);
 
   // Batches now run against a server that processes several hashtags at once
   // (see route.js's CONCURRENCY), so this should finish much faster than
@@ -198,6 +219,13 @@ export default function Home() {
     setShowNewOnly(false);
     setCurrentHistoryId(null);
     setProgress({ done: 0, total: 0 });
+  }
+
+  function confirmReviewerName() {
+    const name = nameDraft.trim();
+    if (!name) return;
+    saveReviewerNameToBrowser(name);
+    setReviewerName(name);
   }
 
   async function handleClassify() {
@@ -270,22 +298,24 @@ export default function Home() {
         );
       }
 
-      const entryId = Date.now();
-      const entry = {
-        id: entryId,
-        timestamp: new Date().toISOString(),
-        name: null,
-        count: newRows.length,
-        rows: newRows,
-        flags: newFlags,
-        editedFlags: newEditedFlags,
-      };
-      setHistory((prev) => {
-        const next = [entry, ...prev].slice(0, HISTORY_LIMIT);
-        saveHistory(next);
-        return next;
-      });
-      setCurrentHistoryId(entryId);
+      // Save to the shared team history. Best-effort: if this fails (DB
+      // hiccup), the classify results the user actually asked for are still
+      // shown — a lost save just means this run won't show up in History.
+      try {
+        const res = await fetch("/api/batches", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ createdBy: reviewerName, rows: newRows, flags: newFlags }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setCurrentHistoryId(data.batch.id);
+          setHistory((prev) => [data.batch, ...prev]);
+        }
+      } catch {
+        // best-effort, see above
+      }
+
       playCompletionChime();
     } catch (err) {
       // Should be rare — per-batch errors are already caught above — but
@@ -338,34 +368,52 @@ export default function Home() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function loadHistoryEntry(entry) {
-    setRows(entry.rows.map((r) => [...r]));
-    // Restore this batch's own mistake history instead of wiping it — older
-    // history entries saved before this existed fall back to "no mistakes yet".
-    setEditedFlags(
-      Array.isArray(entry.editedFlags) ? [...entry.editedFlags] : entry.rows.map(() => false)
-    );
-    setFlags(entry.flags || []);
+  async function loadHistoryEntry(entry) {
+    const res = await fetch(`/api/batches/${entry.id}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const loadedRows = data.rows.map((r) => [
+      r.cat1,
+      r.cat2,
+      r.cat3,
+      r.cat4,
+      r.cat5,
+      r.brand,
+      r.product_line,
+      r.hashtag,
+      r.inclusion,
+      r.new_label,
+      r.comments,
+    ]);
+    setRows(loadedRows);
+    setEditedFlags(data.rows.map((r) => r.edited));
+    setFlags(data.batch.flags || []);
     setShowNewOnly(false);
     setShowHistory(false);
-    setCurrentHistoryId(entry.id);
+    setCurrentHistoryId(data.batch.id);
   }
 
-  function deleteHistoryEntry(id) {
-    setHistory((prev) => {
-      const next = prev.filter((e) => e.id !== id);
-      saveHistory(next);
-      return next;
-    });
+  async function deleteHistoryEntry(id) {
+    setHistory((prev) => prev.filter((e) => e.id !== id));
     if (id === currentHistoryId) setCurrentHistoryId(null);
+    try {
+      await fetch(`/api/batches/${id}`, { method: "DELETE" });
+    } catch {
+      // if this fails the row will reappear on next History refresh, which
+      // is an acceptable fallback rather than blocking the UI on it
+    }
   }
 
   function renameHistoryEntry(id, name) {
-    setHistory((prev) => {
-      const next = prev.map((e) => (e.id === id ? { ...e, name } : e));
-      saveHistory(next);
-      return next;
-    });
+    setHistory((prev) => prev.map((e) => (e.id === id ? { ...e, name } : e)));
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      fetch(`/api/batches/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      }).catch(() => {});
+    }, 500);
   }
 
   const visibleIndices = rows
@@ -375,6 +423,42 @@ export default function Home() {
   const mistakeCount = editedFlags.filter(Boolean).length;
   const accuracyPct = rows.length > 0 ? Math.round(((rows.length - mistakeCount) / rows.length) * 100) : null;
   const progressPct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+
+  // Blocks the rest of the app until we know who's using it — no account,
+  // just a name saved to this browser, so batches/edits can be attributed
+  // for the team-shared History (matches the sibling Kortex tools' pattern).
+  if (reviewerName === null) {
+    return null; // reading localStorage — avoids a flash of the name prompt
+  }
+  if (reviewerName === "") {
+    return (
+      <div className="page">
+        <div className="name-prompt-card">
+          <div className="mark" style={{ margin: "0 auto 16px" }}>
+            #
+          </div>
+          <h1 className="page-title" style={{ textAlign: "center" }}>
+            Who are you?
+          </h1>
+          <p className="page-subtitle" style={{ textAlign: "center" }}>
+            Your name keeps your batch history separate from teammates&apos;. No account needed — saved to this browser.
+          </p>
+          <input
+            className="cell-input"
+            style={{ width: "100%", marginTop: 16 }}
+            placeholder="Type your name…"
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && confirmReviewerName()}
+            autoFocus
+          />
+          <button className="btn btn-primary" style={{ width: "100%", marginTop: 12 }} onClick={confirmReviewerName}>
+            Continue →
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page">
@@ -394,6 +478,17 @@ export default function Home() {
           </h1>
           <p className="page-subtitle">Classify TikTok hashtags against the moria taxonomy sheet.</p>
         </div>
+        <span className="spacer" />
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={() => {
+            setNameDraft(reviewerName);
+            setReviewerName("");
+          }}
+          title="Change your name"
+        >
+          {reviewerName}
+        </button>
       </div>
 
       <div className="card">
@@ -443,11 +538,27 @@ export default function Home() {
 
       {showHistory && (
         <div className="panel">
-          <div className="panel-header">🕐 Past batches</div>
+          <div className="panel-header">
+            🕐 Past batches
+            <span className="history-scope-toggle">
+              <button
+                className={`toggle-pill${historyScope === "all" ? " active" : ""}`}
+                onClick={() => setHistoryScope("all")}
+              >
+                All
+              </button>
+              <button
+                className={`toggle-pill${historyScope === "mine" ? " active" : ""}`}
+                onClick={() => setHistoryScope("mine")}
+              >
+                Mine only
+              </button>
+            </span>
+          </div>
           <div className="panel-body">
             {history.length === 0 && <div className="empty-state">No history yet.</div>}
             {history.map((entry) => {
-              const hMistakes = entryMistakeCount(entry);
+              const hMistakes = entry.mistake_count || 0;
               const hAccuracy = entryAccuracy(entry);
               return (
               <div className="history-row" key={entry.id}>
@@ -458,7 +569,9 @@ export default function Home() {
                     onChange={(e) => renameHistoryEntry(entry.id, e.target.value)}
                     title="Click to rename this batch"
                   />{" "}
-                  <span className="count">— {entry.count} hashtags</span>
+                  <span className="count">
+                    — {entry.row_count} hashtags · {entry.created_by}
+                  </span>
                   <span className="history-stats">
                     <span className={`mistake-badge${hMistakes === 0 ? " zero" : ""}`}>
                       {hMistakes} mistake{hMistakes === 1 ? "" : "s"}
