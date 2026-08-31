@@ -4,13 +4,14 @@ import { sql, parseJsonColumn } from "../../../../lib/db";
 // Full batch detail (all rows, in order) - used by History's "View" action.
 export async function GET(request, { params }) {
   try {
-    const [batch] = await sql`select id, created_at, created_by, name, hashtag_count, flags from batches where id = ${params.id}`;
+    const [batch] = await sql`select id, created_at, created_by, name, hashtag_count, flags, original_rows from batches where id = ${params.id}`;
     if (!batch) {
       return NextResponse.json({ error: "Batch not found" }, { status: 404 });
     }
     batch.flags = parseJsonColumn(batch.flags, []);
+    batch.original_rows = parseJsonColumn(batch.original_rows, []);
     const rows = await sql`
-      select cat1, cat2, cat3, cat4, cat5, brand, product_line, hashtag, inclusion, new_label, comments, edited
+      select cat1, cat2, cat3, cat4, cat5, brand, product_line, hashtag, inclusion, new_label, comments, edited, mistake_tag
       from batch_rows
       where batch_id = ${params.id}
       order by row_index
@@ -53,6 +54,7 @@ export async function PATCH(request, { params }) {
           new_label: r[9] || "",
           comments: r[10] || "",
           edited: Boolean(editedFlags[i]),
+          mistake_tag: r[11] || null,
         }));
         await sql`insert into batch_rows ${sql(rowRecords)}`;
       }

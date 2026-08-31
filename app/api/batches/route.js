@@ -53,10 +53,17 @@ export async function POST(request) {
     return NextResponse.json({ error: "createdBy is required" }, { status: 400 });
   }
 
+  // original_rows snapshots exactly what the AI produced, before anyone
+  // edits anything - written once here and never touched again, so the Data
+  // Quality tab can later show "AI said X, reviewer corrected to Y" even
+  // after batch_rows' cat1..comments get overwritten by edits (the edit
+  // endpoint deletes and reinserts every row on every save).
+  const originalRows = rows.map((r) => r.slice(0, 11));
+
   try {
     const [batch] = await sql`
-      insert into batches (created_by, name, hashtag_count, flags)
-      values (${createdBy}, ${name}, ${rows.length}, ${JSON.stringify(flags)}::jsonb)
+      insert into batches (created_by, name, hashtag_count, flags, original_rows)
+      values (${createdBy}, ${name}, ${rows.length}, ${JSON.stringify(flags)}::jsonb, ${JSON.stringify(originalRows)}::jsonb)
       returning id, created_at, created_by, name, hashtag_count, flags
     `;
     batch.flags = parseJsonColumn(batch.flags, []);
@@ -77,6 +84,7 @@ export async function POST(request) {
         new_label: r[9] || "",
         comments: r[10] || "",
         edited: false,
+        mistake_tag: r[11] || null,
       }));
       await sql`insert into batch_rows ${sql(rowRecords)}`;
     }

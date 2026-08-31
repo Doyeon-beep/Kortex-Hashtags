@@ -9,7 +9,7 @@ export async function POST(request) {
 
   const rows = [HEADER, ...(editedRows || resultsToRows(results))];
   const worksheet = XLSX.utils.aoa_to_sheet(rows);
-  worksheet["!cols"] = [20, 26, 24, 26, 26, 16, 18, 30, 10, 8, 60].map((w) => ({ wch: w }));
+  worksheet["!cols"] = [20, 26, 24, 26, 26, 16, 18, 30, 10, 8, 60, 20].map((w) => ({ wch: w }));
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "hashtag classification");

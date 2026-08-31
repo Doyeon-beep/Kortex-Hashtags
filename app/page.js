@@ -5,27 +5,36 @@ import { HEADER, resultsToRows } from "../lib/exportRows";
 import { reconcileConsistency } from "../lib/consistency";
 
 const REVIEWER_NAME_KEY = "kortexReviewerName";
-const NEW_COL_INDEX = 9; // HEADER = [cat1,cat2,cat3,cat4,cat5,brand,product line,hashtag,inclusion,new,comments]
+const NEW_COL_INDEX = 9; // HEADER = [cat1,cat2,cat3,cat4,cat5,brand,product line,hashtag,inclusion,new,comments,mistake type]
 const INCLUSION_COL_INDEX = 8;
 const HASHTAG_COL_INDEX = 7;
-// Hashtags per /api/classify request. This is just internal chunking — paste
-// as many hashtags as you want into the textarea in one go (100+ is fine),
-// this only controls how they're split into requests behind the scenes.
-//
-// This MUST match the server's CONCURRENCY (route.js), not exceed it. The
-// progress bar only updates once a whole batch finishes, so a batch bigger
-// than CONCURRENCY buys nothing (the server can't run more than CONCURRENCY
-// at once anyway) while making the UI look frozen for longer — e.g. with
-// BATCH_SIZE=15 and CONCURRENCY=5, a run of just 10 hashtags was one single
-// batch, so the bar sat at 0% for the entire ~8 minutes it actually took,
-// looking exactly like a hang even though it was working. Keeping them equal
-// means every batch is one fully-parallel "wave," so progress updates as
-// often as the server can possibly go — no wasted round trips, much better
-// feedback.
-const BATCH_SIZE = 2; // matches CONCURRENCY (route.js) — see the note there on why it was lowered
+const COMMENTS_COL_INDEX = 10;
+const MISTAKE_TAG_COL_INDEX = 11;
+
+// What actually went wrong, picked by whoever reviews/corrects a row. Feeds
+// the Data Quality tab's tag distribution, and — the actual point of
+// collecting it — tells us which categories of classification guideline
+// gaps show up most often in practice, from real corrections instead of
+// guessing.
+const MISTAKE_TAGS = [
+  { value: "cat_wrong", label: "Category path wrong" },
+  { value: "cat_too_generic", label: "Category too generic (stopped too early)" },
+  { value: "cat_missing", label: "Should have proposed new cat5" },
+  { value: "brand_wrong", label: "Brand wrong" },
+  { value: "brand_missing", label: "Brand missing (exists but not found)" },
+  { value: "product_line_wrong", label: "Product line wrong" },
+  { value: "product_line_missing", label: "Product line missing" },
+  { value: "inclusion_wrong", label: "Include/exclude wrong" },
+  { value: "segmentation_wrong", label: "Hashtag split wrong" },
+  { value: "other", label: "Other" },
+];
+
+function mistakeTagLabel(value) {
+  return MISTAKE_TAGS.find((t) => t.value === value)?.label || value;
+}
 
 function isInconsistentRow(row) {
-  return String(row[row.length - 1] || "").includes("Consistency check needed");
+  return String(row[COMMENTS_COL_INDEX] || "").includes("Consistency check needed");
 }
 
 function isNewRow(row) {
@@ -117,6 +126,7 @@ function SparkleIcon() {
 }
 
 export default function Home() {
+  const [view, setView] = useState("classify"); // "classify" | "history" | "quality"
   const [input, setInput] = useState("");
   const [rows, setRows] = useState([]); // array of arrays, matches HEADER order — editable
   const [editedFlags, setEditedFlags] = useState([]); // parallel to rows — true if manually edited
@@ -128,10 +138,11 @@ export default function Home() {
   const [showNewOnly, setShowNewOnly] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyScope, setHistoryScope] = useState("all"); // "all" | "mine"
-  const [showHistory, setShowHistory] = useState(false);
   const [currentHistoryId, setCurrentHistoryId] = useState(null); // which history entry the current view is tied to
   const [reviewerName, setReviewerName] = useState(null); // null = not loaded yet, "" = needs to be asked
   const [nameDraft, setNameDraft] = useState("");
+  const [quality, setQuality] = useState(null);
+  const [qualityScope, setQualityScope] = useState("all"); // "all" | "mine"
   // Two independent debounced saves (row edits, batch rename) - separate refs
   // so triggering one can't cancel a pending timer for the other.
   const rowsSaveTimerRef = useRef(null);
@@ -162,6 +173,22 @@ export default function Home() {
     if (reviewerName) fetchHistory(historyScope);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reviewerName, historyScope]);
+
+  async function fetchQuality(scope) {
+    try {
+      const url = scope === "mine" && reviewerName ? `/api/quality?reviewer=${encodeURIComponent(reviewerName)}` : "/api/quality";
+      const res = await fetch(url);
+      if (!res.ok) return;
+      setQuality(await res.json());
+    } catch {
+      // best-effort, same reasoning as fetchHistory
+    }
+  }
+
+  useEffect(() => {
+    if (reviewerName && view === "quality") fetchQuality(qualityScope);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewerName, view, qualityScope]);
 
   // Keep the current batch's saved row data in sync with every edit (cell
   // edits, row deletes) so mistakes/accuracy survive switching to History and
@@ -216,6 +243,10 @@ export default function Home() {
   // server is still legitimately finishing up and about to respond.
   const BATCH_TIMEOUT_MS = 320000; // a bit over route.js's 280s per-hashtag budget
 
+  // Hashtags per /api/classify request — see route.js's CONCURRENCY for why
+  // this must match it exactly.
+  const BATCH_SIZE = 2;
+
   // Clears the current input/results back to the initial empty view — lets
   // someone running several batches back-to-back start each one from a
   // clean screen, so a finished batch's results can't be mistaken for
@@ -225,6 +256,7 @@ export default function Home() {
   // `progress` mid-run would make the progress bar jump back to 0% while a
   // batch is still genuinely running.
   function resetToHome() {
+    setView("classify");
     setInput("");
     setRows([]);
     setEditedFlags([]);
@@ -398,12 +430,13 @@ export default function Home() {
       r.inclusion,
       r.new_label,
       r.comments,
+      r.mistake_tag || "",
     ]);
     setRows(loadedRows);
     setEditedFlags(data.rows.map((r) => r.edited));
     setFlags(data.batch.flags || []);
     setShowNewOnly(false);
-    setShowHistory(false);
+    setView("classify");
     setCurrentHistoryId(data.batch.id);
   }
 
@@ -493,6 +526,17 @@ export default function Home() {
           <p className="page-subtitle">Classify TikTok hashtags against the moria taxonomy sheet.</p>
         </div>
         <span className="spacer" />
+        <nav className="top-tabs">
+          <button className={`top-tab${view === "classify" ? " active" : ""}`} onClick={() => setView("classify")}>
+            New batch
+          </button>
+          <button className={`top-tab${view === "history" ? " active" : ""}`} onClick={() => setView("history")}>
+            History
+          </button>
+          <button className={`top-tab${view === "quality" ? " active" : ""}`} onClick={() => setView("quality")}>
+            Data quality
+          </button>
+        </nav>
         <button
           className="btn btn-ghost btn-sm"
           onClick={() => {
@@ -505,52 +549,186 @@ export default function Home() {
         </button>
       </div>
 
-      <div className="card">
-        <textarea
-          className="textarea"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={"#nativemarket\n#granolalifestyle\n#howtodoyoureyebrows"}
-          rows={7}
-        />
-        <p className="hint">
-          Enter hashtags one per line. For reference: items with no exact match are automatically
-          researched with AI (includes TikTok/Google search, incurs cost).
-        </p>
+      {view === "classify" && (
+        <>
+          <div className="card">
+            <textarea
+              className="textarea"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={"#nativemarket\n#granolalifestyle\n#howtodoyoureyebrows"}
+              rows={7}
+            />
+            <p className="hint">
+              Enter hashtags one per line. For reference: items with no exact match are automatically
+              researched with AI (includes TikTok/Google search, incurs cost).
+            </p>
 
-        <div className="toolbar">
-          <button className="btn btn-primary" onClick={handleClassify} disabled={loading}>
-            {loading ? `Classifying… ${progressPct}%` : "Classify"}
-          </button>
-          {rows.length > 0 && (
-            <>
-              <button className="btn" onClick={handleCopy}>
-                {copied ? "Copied!" : `Copy Table (${rows.length} row${rows.length === 1 ? "" : "s"})`}
+            <div className="toolbar">
+              <button className="btn btn-primary" onClick={handleClassify} disabled={loading}>
+                {loading ? `Classifying… ${progressPct}%` : "Classify"}
               </button>
-              <button className="btn" onClick={handleExport}>
-                Export to Excel
-              </button>
-            </>
-          )}
-          <span className="spacer" />
-          <button className="btn btn-ghost" onClick={() => setShowHistory((v) => !v)}>
-            History ({history.length})
-          </button>
-        </div>
-
-        {loading && (
-          <div className="progress-wrap">
-            <div className="progress-track">
-              <div className="progress-fill" style={{ width: `${progressPct}%` }} />
+              {rows.length > 0 && (
+                <>
+                  <button className="btn" onClick={handleCopy}>
+                    {copied ? "Copied!" : `Copy Table (${rows.length} row${rows.length === 1 ? "" : "s"})`}
+                  </button>
+                  <button className="btn" onClick={handleExport}>
+                    Export to Excel
+                  </button>
+                </>
+              )}
             </div>
-            <span className="progress-label">
-              {progress.done}/{progress.total} hashtags
-            </span>
-          </div>
-        )}
-      </div>
 
-      {showHistory && (
+            {loading && (
+              <div className="progress-wrap">
+                <div className="progress-track">
+                  <div className="progress-fill" style={{ width: `${progressPct}%` }} />
+                </div>
+                <span className="progress-label">
+                  {progress.done}/{progress.total} hashtags
+                </span>
+              </div>
+            )}
+          </div>
+
+          {classifyError && (
+            <div className="banner banner-error">
+              <p className="banner-title">⚠️ {classifyError}</p>
+            </div>
+          )}
+
+          {flags.length > 0 && (
+            <div className="banner">
+              <p className="banner-title">⚠️ Consistency check needed within this batch</p>
+              <ul>
+                {flags.map((f, i) => (
+                  <li key={i}>
+                    {f.message} ({f.hashtags.map((h) => "#" + h).join(", ")})
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {rows.length > 0 && (
+            <div className="card" style={{ marginTop: 20 }}>
+              <div className="results-header">
+                <h2 className="results-title">Results</h2>
+                <span className={`mistake-badge${mistakeCount === 0 ? " zero" : ""}`}>
+                  {mistakeCount} mistake{mistakeCount === 1 ? "" : "s"}
+                </span>
+                {accuracyPct !== null && (
+                  <span className={`accuracy-badge${accuracyPct < 90 ? " low" : ""}`}>
+                    {accuracyPct}% accuracy
+                  </span>
+                )}
+              </div>
+
+              <div className="table-toolbar">
+                <p className="hint" style={{ margin: 0 }}>
+                  Click any cell to edit it directly. Spotted a mistake? Pick why in the "mistake type" column —
+                  it feeds the Data Quality tab. Changes are reflected in Copy and Export to Excel.
+                </p>
+                <button
+                  className={`toggle-pill${showNewOnly ? " active" : ""}`}
+                  onClick={() => setShowNewOnly((v) => !v)}
+                  title="Show only new entries"
+                >
+                  <SparkleIcon />
+                  New only
+                </button>
+              </div>
+
+              <div className="table-scroll">
+                <table className="grid">
+                  <thead>
+                    <tr>
+                      {HEADER.map((h) => (
+                        <th key={h}>{h}</th>
+                      ))}
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleIndices.map((i) => {
+                      const row = rows[i];
+                      return (
+                        <tr key={i} className={isInconsistentRow(row) ? "inconsistent" : ""}>
+                          {row.map((cell, j) => {
+                            if (j === INCLUSION_COL_INDEX) {
+                              const valueClass =
+                                cell === "include"
+                                  ? "value-include"
+                                  : cell === "exclude"
+                                  ? "value-exclude"
+                                  : "value-blank";
+                              return (
+                                <td key={j}>
+                                  <select
+                                    className={`select-inclusion ${valueClass}`}
+                                    value={cell || ""}
+                                    onChange={(e) => updateCell(i, j, e.target.value)}
+                                  >
+                                    <option value="">—</option>
+                                    <option value="include">include</option>
+                                    <option value="exclude">exclude</option>
+                                  </select>
+                                </td>
+                              );
+                            }
+                            if (j === MISTAKE_TAG_COL_INDEX) {
+                              return (
+                                <td key={j}>
+                                  <select
+                                    className={`select-inclusion${cell ? " value-exclude" : " value-blank"}`}
+                                    value={cell || ""}
+                                    onChange={(e) => updateCell(i, j, e.target.value)}
+                                  >
+                                    <option value="">—</option>
+                                    {MISTAKE_TAGS.map((t) => (
+                                      <option key={t.value} value={t.value}>
+                                        {t.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+                              );
+                            }
+                            const extraClass =
+                              j === COMMENTS_COL_INDEX ? " wide" : j === HASHTAG_COL_INDEX ? " hashtag-col" : "";
+                            return (
+                              <td key={j}>
+                                <input
+                                  className={`cell-input${extraClass}`}
+                                  value={cell}
+                                  title={cell}
+                                  onChange={(e) => updateCell(i, j, e.target.value)}
+                                />
+                              </td>
+                            );
+                          })}
+                          <td className="row-actions">
+                            <button className="btn btn-ghost btn-sm" onClick={() => deleteRow(i)} title="Delete row">
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {showNewOnly && visibleIndices.length === 0 && (
+                <div className="empty-state">No new entries in this batch.</div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {view === "history" && (
         <div className="panel">
           <div className="panel-header">
             🕐 Past batches
@@ -569,7 +747,7 @@ export default function Home() {
               </button>
             </span>
           </div>
-          <div className="panel-body">
+          <div className="panel-body panel-body-full">
             {history.length === 0 && <div className="empty-state">No history yet.</div>}
             {history.map((entry) => {
               const hMistakes = entry.mistake_count || 0;
@@ -616,117 +794,112 @@ export default function Home() {
         </div>
       )}
 
-      {classifyError && (
-        <div className="banner banner-error">
-          <p className="banner-title">⚠️ {classifyError}</p>
-        </div>
-      )}
-
-      {flags.length > 0 && (
-        <div className="banner">
-          <p className="banner-title">⚠️ Consistency check needed within this batch</p>
-          <ul>
-            {flags.map((f, i) => (
-              <li key={i}>
-                {f.message} ({f.hashtags.map((h) => "#" + h).join(", ")})
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {rows.length > 0 && (
-        <div className="card" style={{ marginTop: 20 }}>
-          <div className="results-header">
-            <h2 className="results-title">Results</h2>
-            <span className={`mistake-badge${mistakeCount === 0 ? " zero" : ""}`}>
-              {mistakeCount} mistake{mistakeCount === 1 ? "" : "s"}
+      {view === "quality" && (
+        <div className="quality-view">
+          <div className="quality-header">
+            <span className="history-scope-toggle">
+              <button
+                className={`toggle-pill${qualityScope === "all" ? " active" : ""}`}
+                onClick={() => setQualityScope("all")}
+              >
+                All reviewers
+              </button>
+              <button
+                className={`toggle-pill${qualityScope === "mine" ? " active" : ""}`}
+                onClick={() => setQualityScope("mine")}
+              >
+                Mine only
+              </button>
             </span>
-            {accuracyPct !== null && (
-              <span className={`accuracy-badge${accuracyPct < 90 ? " low" : ""}`}>
-                {accuracyPct}% accuracy
-              </span>
-            )}
           </div>
 
-          <div className="table-toolbar">
-            <p className="hint" style={{ margin: 0 }}>
-              Click any cell to edit it directly. Changes are reflected in Copy and Export to Excel.
-            </p>
-            <button
-              className={`toggle-pill${showNewOnly ? " active" : ""}`}
-              onClick={() => setShowNewOnly((v) => !v)}
-              title="Show only new entries"
-            >
-              <SparkleIcon />
-              New only
-            </button>
-          </div>
+          {!quality && <div className="empty-state">Loading…</div>}
 
-          <div className="table-scroll">
-            <table className="grid">
-              <thead>
-                <tr>
-                  {HEADER.map((h) => (
-                    <th key={h}>{h}</th>
+          {quality && (
+            <>
+              <div className="quality-cards">
+                <div className="quality-card">
+                  <span className="quality-card-label">Total rows reviewed</span>
+                  <span className="quality-card-value">{quality.summary.totalRows}</span>
+                </div>
+                <div className="quality-card">
+                  <span className="quality-card-label">Total mistakes</span>
+                  <span className="quality-card-value">{quality.summary.totalMistakes}</span>
+                </div>
+                <div className="quality-card">
+                  <span className="quality-card-label">Accuracy</span>
+                  <span className="quality-card-value">
+                    {quality.summary.accuracyPct === null ? "—" : `${quality.summary.accuracyPct}%`}
+                  </span>
+                </div>
+              </div>
+
+              <div className="panel" style={{ marginTop: 16 }}>
+                <div className="panel-header">Mistake types</div>
+                <div className="panel-body panel-body-full">
+                  {quality.tagDistribution.length === 0 && (
+                    <div className="empty-state">No tagged mistakes yet — pick a "mistake type" when you correct a row.</div>
+                  )}
+                  {quality.tagDistribution.map((t) => {
+                    const max = quality.tagDistribution[0]?.count || 1;
+                    return (
+                      <div className="tag-bar-row" key={t.tag}>
+                        <span className="tag-bar-label">{mistakeTagLabel(t.tag)}</span>
+                        <div className="tag-bar-track">
+                          <div className="tag-bar-fill" style={{ width: `${(t.count / max) * 100}%` }} />
+                        </div>
+                        <span className="tag-bar-count">{t.count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {qualityScope === "all" && quality.byReviewer.length > 0 && (
+                <div className="panel" style={{ marginTop: 16 }}>
+                  <div className="panel-header">By reviewer</div>
+                  <div className="panel-body panel-body-full">
+                    {quality.byReviewer.map((r) => (
+                      <div className="history-row" key={r.reviewer}>
+                        <span className="history-meta">{r.reviewer}</span>
+                        <span className="history-stats">
+                          <span className="count">{r.rows} rows</span>
+                          <span className={`mistake-badge${r.mistakes === 0 ? " zero" : ""}`}>{r.mistakes} mistakes</span>
+                          <span className={`accuracy-badge${r.accuracy !== null && r.accuracy < 90 ? " low" : ""}`}>
+                            {r.accuracy === null ? "—" : `${r.accuracy}%`}
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="panel" style={{ marginTop: 16 }}>
+                <div className="panel-header">Mistake log</div>
+                <div className="panel-body panel-body-full">
+                  {quality.mistakeLog.length === 0 && <div className="empty-state">No tagged mistakes yet.</div>}
+                  {quality.mistakeLog.map((m) => (
+                    <div className="mistake-log-row" key={m.id}>
+                      <div className="mistake-log-top">
+                        <span className="mistake-log-hashtag">#{m.hashtag}</span>
+                        <span className="mistake-badge">{mistakeTagLabel(m.tag)}</span>
+                        <span className="count">{m.reviewer}</span>
+                      </div>
+                      {m.changes.length > 0 && (
+                        <ul className="mistake-log-changes">
+                          {m.changes.map((c, i) => (
+                            <li key={i}>
+                              <strong>{c.field}:</strong> {c.from || "(blank)"} → {c.to || "(blank)"}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                   ))}
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleIndices.map((i) => {
-                  const row = rows[i];
-                  return (
-                    <tr key={i} className={isInconsistentRow(row) ? "inconsistent" : ""}>
-                      {row.map((cell, j) => {
-                        if (j === INCLUSION_COL_INDEX) {
-                          const valueClass =
-                            cell === "include"
-                              ? "value-include"
-                              : cell === "exclude"
-                              ? "value-exclude"
-                              : "value-blank";
-                          return (
-                            <td key={j}>
-                              <select
-                                className={`select-inclusion ${valueClass}`}
-                                value={cell || ""}
-                                onChange={(e) => updateCell(i, j, e.target.value)}
-                              >
-                                <option value="">—</option>
-                                <option value="include">include</option>
-                                <option value="exclude">exclude</option>
-                              </select>
-                            </td>
-                          );
-                        }
-                        const extraClass =
-                          j === HEADER.length - 1 ? " wide" : j === HASHTAG_COL_INDEX ? " hashtag-col" : "";
-                        return (
-                          <td key={j}>
-                            <input
-                              className={`cell-input${extraClass}`}
-                              value={cell}
-                              title={cell}
-                              onChange={(e) => updateCell(i, j, e.target.value)}
-                            />
-                          </td>
-                        );
-                      })}
-                      <td className="row-actions">
-                        <button className="btn btn-ghost btn-sm" onClick={() => deleteRow(i)} title="Delete row">
-                          ✕
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {showNewOnly && visibleIndices.length === 0 && (
-            <div className="empty-state">No new entries in this batch.</div>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}
