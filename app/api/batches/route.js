@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { sql } from "../../../lib/db";
+import { sql, parseJsonColumn } from "../../../lib/db";
 
 // List batches for the History tab. Every teammate's batches are visible by
 // default (that's the whole point - a shared History instead of the old
@@ -59,6 +59,7 @@ export async function POST(request) {
       values (${createdBy}, ${name}, ${rows.length}, ${JSON.stringify(flags)}::jsonb)
       returning id, created_at, created_by, name, hashtag_count, flags
     `;
+    batch.flags = parseJsonColumn(batch.flags, []);
 
     if (rows.length > 0) {
       const rowRecords = rows.map((r, i) => ({

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { sql } from "../../../../lib/db";
+import { sql, parseJsonColumn } from "../../../../lib/db";
 
 // Full batch detail (all rows, in order) - used by History's "View" action.
 export async function GET(request, { params }) {
@@ -8,6 +8,7 @@ export async function GET(request, { params }) {
     if (!batch) {
       return NextResponse.json({ error: "Batch not found" }, { status: 404 });
     }
+    batch.flags = parseJsonColumn(batch.flags, []);
     const rows = await sql`
       select cat1, cat2, cat3, cat4, cat5, brand, product_line, hashtag, inclusion, new_label, comments, edited
       from batch_rows
