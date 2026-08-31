@@ -882,7 +882,7 @@ export default function Home() {
                   {quality.mistakeLog.map((m) => (
                     <div className="mistake-log-row" key={m.id}>
                       <div className="mistake-log-top">
-                        <span className="mistake-log-hashtag">#{m.hashtag}</span>
+                        <span className="mistake-log-hashtag">{m.hashtag}</span>
                         <span className="mistake-badge">{mistakeTagLabel(m.tag)}</span>
                         <span className="count">{m.reviewer}</span>
                       </div>
