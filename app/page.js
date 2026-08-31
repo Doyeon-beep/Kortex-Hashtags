@@ -132,7 +132,10 @@ export default function Home() {
   const [currentHistoryId, setCurrentHistoryId] = useState(null); // which history entry the current view is tied to
   const [reviewerName, setReviewerName] = useState(null); // null = not loaded yet, "" = needs to be asked
   const [nameDraft, setNameDraft] = useState("");
-  const saveTimerRef = useRef(null);
+  // Two independent debounced saves (row edits, batch rename) - separate refs
+  // so triggering one can't cancel a pending timer for the other.
+  const rowsSaveTimerRef = useRef(null);
+  const renameSaveTimerRef = useRef(null);
 
   // Every batch is attributed to a reviewer name so History/Data Quality can
   // be shared across the team instead of trapped in one person's browser —
@@ -167,8 +170,8 @@ export default function Home() {
   // keystroke; only the LATEST state after a pause gets persisted.
   useEffect(() => {
     if (currentHistoryId == null) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
+    if (rowsSaveTimerRef.current) clearTimeout(rowsSaveTimerRef.current);
+    rowsSaveTimerRef.current = setTimeout(() => {
       fetch(`/api/batches/${currentHistoryId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -189,7 +192,7 @@ export default function Home() {
         )
       );
     }, 800);
-    return () => clearTimeout(saveTimerRef.current);
+    return () => clearTimeout(rowsSaveTimerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, editedFlags, currentHistoryId]);
 
@@ -417,8 +420,8 @@ export default function Home() {
 
   function renameHistoryEntry(id, name) {
     setHistory((prev) => prev.map((e) => (e.id === id ? { ...e, name } : e)));
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
+    if (renameSaveTimerRef.current) clearTimeout(renameSaveTimerRef.current);
+    renameSaveTimerRef.current = setTimeout(() => {
       fetch(`/api/batches/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
