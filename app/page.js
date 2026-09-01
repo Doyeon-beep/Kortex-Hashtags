@@ -178,6 +178,7 @@ export default function Home() {
   const [nameDraft, setNameDraft] = useState("");
   const [quality, setQuality] = useState(null);
   const [qualityScope, setQualityScope] = useState("all"); // "all" | "mine"
+  const [logTagFilter, setLogTagFilter] = useState("all"); // "all" | one of MISTAKE_TAGS' values
   // Two independent debounced saves (row edits, batch rename) - separate refs
   // so triggering one can't cancel a pending timer for the other.
   const rowsSaveTimerRef = useRef(null);
@@ -505,6 +506,9 @@ export default function Home() {
   const mistakeCount = editedFlags.filter(Boolean).length;
   const accuracyPct = rows.length > 0 ? Math.round(((rows.length - mistakeCount) / rows.length) * 100) : null;
   const progressPct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+  const filteredMistakeLog = quality
+    ? quality.mistakeLog.filter((m) => logTagFilter === "all" || m.tag === logTagFilter)
+    : [];
 
   // Blocks the rest of the app until we know who's using it — no account,
   // just a name saved to this browser, so batches/edits can be attributed
@@ -926,20 +930,38 @@ export default function Home() {
               )}
 
               <div className="panel" style={{ marginTop: 16 }}>
-                <div className="panel-header">Mistake log</div>
+                <div className="panel-header">
+                  Mistake log
+                  <select
+                    className="log-filter-select"
+                    value={logTagFilter}
+                    onChange={(e) => setLogTagFilter(e.target.value)}
+                  >
+                    <option value="all">All types</option>
+                    {MISTAKE_TAGS.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="panel-body panel-body-full">
-                  {quality.mistakeLog.length === 0 && <div className="empty-state">No tagged mistakes yet.</div>}
-                  {quality.mistakeLog.map((m) => (
+                  {filteredMistakeLog.length === 0 && (
+                    <div className="empty-state">
+                      {quality.mistakeLog.length === 0
+                        ? "No tagged mistakes yet."
+                        : "No mistakes tagged with this type."}
+                    </div>
+                  )}
+                  {filteredMistakeLog.map((m) => (
                     <div className="mistake-log-row" key={m.id}>
                       <div className="mistake-log-top">
                         <span className="mistake-log-hashtag">{m.hashtag}</span>
                         <span className={`mistake-badge mtag-${m.tag}`}>{mistakeTagLabel(m.tag)}</span>
-                        <span className="count">{m.reviewer}</span>
+                        <span className="mistake-log-reviewer">{m.reviewer}</span>
+                        <span className="mistake-log-original-hint">(AI originally classified as)</span>
                       </div>
-                      <div className="mistake-log-original">
-                        <span className="mistake-log-original-label">AI originally classified as:</span>{" "}
-                        {formatClassificationSummary(m.originalClassification)}
-                      </div>
+                      <div className="mistake-log-original">{formatClassificationSummary(m.originalClassification)}</div>
                       {m.changes.length > 0 && (
                         <ul className="mistake-log-changes">
                           {m.changes.map((c, i) => (

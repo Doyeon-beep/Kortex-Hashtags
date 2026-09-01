@@ -775,11 +775,29 @@ table.grid td:last-child {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .mistake-log-hashtag {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
+}
+
+/* Hashtag and mistake-type badge should read as equally prominent - the
+   badge already sits at 14px elsewhere (Results header, History), but here
+   it's bumped to match the hashtag's 15px rather than the other way
+   around, since shrinking the hashtag would make it harder to scan. */
+.mistake-log-top .mistake-badge {
+  font-size: 15px;
+}
+
+/* The reviewer name is the least important part of a log entry (matches
+   the muted, small "count" text used elsewhere, e.g. History's row meta) -
+   its own class instead of reusing bare .count, which has no styling
+   outside .history-meta. */
+.mistake-log-reviewer {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .mistake-log-changes {
@@ -795,16 +813,37 @@ table.grid td:last-child {
 
 /* What the AI itself originally produced for this hashtag, shown above the
    corrections so the mistake log reads as "AI said X, reviewer fixed to Y"
-   in one place instead of just the diffed fields. */
+   in one place instead of just the diffed fields. The "AI originally
+   classified as" label itself lives inline in .mistake-log-top instead of
+   repeating above every entry's classification line. */
 .mistake-log-original {
   margin-top: 6px;
-  font-size: 13px;
-  color: var(--text-muted);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text);
 }
 
-.mistake-log-original-label {
-  font-weight: 600;
+.mistake-log-original-hint {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.log-filter-select {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 30px 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23726e82'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
 }
 
 /* Mistake-type colors — one distinct color per tag so the dropdown in
