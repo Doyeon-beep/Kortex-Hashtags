@@ -97,12 +97,23 @@ export async function GET(request) {
         from: original[f.index] || "",
         to: current[f.index] || "",
       }));
+      const originalClassification = {
+        cat1: original[0] || "",
+        cat2: original[1] || "",
+        cat3: original[2] || "",
+        cat4: original[3] || "",
+        cat5: original[4] || "",
+        brand: original[5] || "",
+        productLine: original[6] || "",
+        inclusion: original[8] || "",
+      };
       return {
         id: row.id,
         hashtag: row.hashtag,
         tag: row.mistake_tag,
         reviewer: row.reviewer,
         changes,
+        originalClassification,
       };
     });
 

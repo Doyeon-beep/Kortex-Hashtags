@@ -31,7 +31,7 @@ body {
 }
 
 .page {
-  max-width: 1520px;
+  max-width: min(1900px, 97vw);
   margin: 0 auto;
   padding: 40px 24px 80px;
 }
@@ -406,6 +406,13 @@ table.grid td:last-child {
   min-width: 300px;
 }
 
+/* cat1..product_line columns — give them enough room that longer taxonomy
+   paths and brand/product-line names are fully readable without hovering
+   for the title tooltip. */
+.cell-input.cat-col {
+  min-width: 170px;
+}
+
 .badge {
   display: inline-block;
   font-size: 11px;
@@ -655,7 +662,7 @@ table.grid td:last-child {
   border: none;
   background: transparent;
   padding: 7px 14px;
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 600;
   font-family: var(--font-sans);
   color: var(--text-muted);
@@ -784,4 +791,95 @@ table.grid td:last-child {
 
 .mistake-log-changes li {
   margin-bottom: 2px;
+}
+
+/* What the AI itself originally produced for this hashtag, shown above the
+   corrections so the mistake log reads as "AI said X, reviewer fixed to Y"
+   in one place instead of just the diffed fields. */
+.mistake-log-original {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.mistake-log-original-label {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Mistake-type colors — one distinct color per tag so the dropdown in
+   Results and the tag distribution / mistake log in Data Quality are all
+   scannable at a glance without reading the label every time. */
+.tag-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.mtag-cat_wrong {
+  background-color: #fbdfe4;
+  color: #b0223b;
+  border-color: #f3b9c3 !important;
+}
+
+.mtag-cat_too_generic {
+  background-color: #ffe8cc;
+  color: #b5651d;
+  border-color: #f6d3a3 !important;
+}
+
+.mtag-cat_missing {
+  background-color: #fff3b0;
+  color: #8a6d00;
+  border-color: #f0e08a !important;
+}
+
+.mtag-brand_wrong {
+  background-color: #ede8fb;
+  color: #6b3fa0;
+  border-color: #d9cdf5 !important;
+}
+
+.mtag-brand_missing {
+  background-color: #e0d4fb;
+  color: #5a2ea6;
+  border-color: #cbb6f2 !important;
+}
+
+.mtag-product_line_wrong {
+  background-color: #d3f3ee;
+  color: #0f766e;
+  border-color: #aee5db !important;
+}
+
+.mtag-product_line_missing {
+  background-color: #d6f0fa;
+  color: #0e6ba8;
+  border-color: #ade0f5 !important;
+}
+
+.mtag-inclusion_wrong {
+  background-color: #fbdce9;
+  color: #a3155e;
+  border-color: #f3b8d4 !important;
+}
+
+.mtag-segmentation_wrong {
+  background-color: #dcf5e3;
+  color: #157a3d;
+  border-color: #b9e8c6 !important;
+}
+
+.mtag-other {
+  background-color: #ececec;
+  color: #5b5b66;
+  border-color: #d8d8dc !important;
+}
+
+.mtag-blank {
+  background-color: transparent;
+  color: var(--text-muted);
 }

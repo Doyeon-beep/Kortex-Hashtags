@@ -33,6 +33,41 @@ function mistakeTagLabel(value) {
   return MISTAKE_TAGS.find((t) => t.value === value)?.label || value;
 }
 
+// Solid colors (matching the pastel .mtag-<value> CSS classes' text color)
+// used for the small dot next to each tag in the Data Quality distribution —
+// same color language as the dropdown/badges, just dense enough to read as
+// a dot rather than a background.
+const MISTAKE_TAG_DOT_COLORS = {
+  cat_wrong: "#b0223b",
+  cat_too_generic: "#b5651d",
+  cat_missing: "#8a6d00",
+  brand_wrong: "#6b3fa0",
+  brand_missing: "#5a2ea6",
+  product_line_wrong: "#0f766e",
+  product_line_missing: "#0e6ba8",
+  inclusion_wrong: "#a3155e",
+  segmentation_wrong: "#157a3d",
+  other: "#5b5b66",
+};
+
+// Cat1..product_line are stored at fixed indices (see the HEADER comment
+// above) — used to widen just those columns in the Results table.
+const CAT_COLS_END_INDEX = 6; // product_line
+
+// A quick "cat1 › cat2 › ... · brand: X · product line: Y · include" summary
+// of a full row snapshot, used to show what the AI originally produced
+// alongside the reviewer's correction in the Data Quality mistake log.
+function formatClassificationSummary(o) {
+  if (!o) return "(no classification)";
+  const path = [o.cat1, o.cat2, o.cat3, o.cat4, o.cat5].filter(Boolean).join(" › ");
+  const extras = [];
+  if (o.brand) extras.push(`brand: ${o.brand}`);
+  if (o.productLine) extras.push(`product line: ${o.productLine}`);
+  if (o.inclusion) extras.push(o.inclusion);
+  const parts = [path, ...extras].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "(no classification)";
+}
+
 function isInconsistentRow(row) {
   return String(row[COMMENTS_COL_INDEX] || "").includes("Consistency check needed");
 }
@@ -681,7 +716,7 @@ export default function Home() {
                               return (
                                 <td key={j}>
                                   <select
-                                    className={`select-inclusion${cell ? " value-exclude" : " value-blank"}`}
+                                    className={`select-inclusion mtag-${cell || "blank"}`}
                                     value={cell || ""}
                                     onChange={(e) => updateCell(i, j, e.target.value)}
                                   >
@@ -696,7 +731,13 @@ export default function Home() {
                               );
                             }
                             const extraClass =
-                              j === COMMENTS_COL_INDEX ? " wide" : j === HASHTAG_COL_INDEX ? " hashtag-col" : "";
+                              j === COMMENTS_COL_INDEX
+                                ? " wide"
+                                : j === HASHTAG_COL_INDEX
+                                ? " hashtag-col"
+                                : j <= CAT_COLS_END_INDEX
+                                ? " cat-col"
+                                : "";
                             return (
                               <td key={j}>
                                 <input
@@ -844,9 +885,18 @@ export default function Home() {
                     const max = quality.tagDistribution[0]?.count || 1;
                     return (
                       <div className="tag-bar-row" key={t.tag}>
-                        <span className="tag-bar-label">{mistakeTagLabel(t.tag)}</span>
+                        <span className="tag-bar-label">
+                          <span className="tag-dot" style={{ background: MISTAKE_TAG_DOT_COLORS[t.tag] || "#9a97a8" }} />
+                          {mistakeTagLabel(t.tag)}
+                        </span>
                         <div className="tag-bar-track">
-                          <div className="tag-bar-fill" style={{ width: `${(t.count / max) * 100}%` }} />
+                          <div
+                            className="tag-bar-fill"
+                            style={{
+                              width: `${(t.count / max) * 100}%`,
+                              background: MISTAKE_TAG_DOT_COLORS[t.tag] || undefined,
+                            }}
+                          />
                         </div>
                         <span className="tag-bar-count">{t.count}</span>
                       </div>
@@ -883,8 +933,12 @@ export default function Home() {
                     <div className="mistake-log-row" key={m.id}>
                       <div className="mistake-log-top">
                         <span className="mistake-log-hashtag">{m.hashtag}</span>
-                        <span className="mistake-badge">{mistakeTagLabel(m.tag)}</span>
+                        <span className={`mistake-badge mtag-${m.tag}`}>{mistakeTagLabel(m.tag)}</span>
                         <span className="count">{m.reviewer}</span>
+                      </div>
+                      <div className="mistake-log-original">
+                        <span className="mistake-log-original-label">AI originally classified as:</span>{" "}
+                        {formatClassificationSummary(m.originalClassification)}
                       </div>
                       {m.changes.length > 0 && (
                         <ul className="mistake-log-changes">
