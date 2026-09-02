@@ -107,6 +107,16 @@ export async function GET(request) {
         productLine: original[6] || "",
         inclusion: original[8] || "",
       };
+      const currentClassification = {
+        cat1: current[0] || "",
+        cat2: current[1] || "",
+        cat3: current[2] || "",
+        cat4: current[3] || "",
+        cat5: current[4] || "",
+        brand: current[5] || "",
+        productLine: current[6] || "",
+        inclusion: current[8] || "",
+      };
       return {
         id: row.id,
         hashtag: row.hashtag,
@@ -114,6 +124,7 @@ export async function GET(request) {
         reviewer: row.reviewer,
         changes,
         originalClassification,
+        currentClassification,
       };
     });
 

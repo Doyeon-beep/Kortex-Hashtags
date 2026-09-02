@@ -100,6 +100,15 @@ function entryAccuracy(entry) {
   return Math.round(((total - (entry.mistake_count || 0)) / total) * 100);
 }
 
+// "1m 42s" / "38s" - used for the post-classify run-stats summary, where a
+// raw millisecond count wouldn't mean anything to whoever's reading it.
+function formatDuration(ms) {
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
 function defaultBatchName(entry) {
   const d = new Date(entry.created_at);
   return d.toLocaleString("en-US", {
@@ -179,6 +188,11 @@ export default function Home() {
   const [quality, setQuality] = useState(null);
   const [qualityScope, setQualityScope] = useState("all"); // "all" | "mine"
   const [logTagFilter, setLogTagFilter] = useState("all"); // "all" | one of MISTAKE_TAGS' values
+  // How many of the just-run batch's hashtags needed AI research and how
+  // long the whole run took - only meaningful for the run that just
+  // finished (not persisted), so it's cleared whenever a new run starts or
+  // a past History entry is loaded instead.
+  const [runStats, setRunStats] = useState(null);
   // Two independent debounced saves (row edits, batch rename) - separate refs
   // so triggering one can't cancel a pending timer for the other.
   const rowsSaveTimerRef = useRef(null);
@@ -301,6 +315,7 @@ export default function Home() {
     setShowNewOnly(false);
     setCurrentHistoryId(null);
     setProgress({ done: 0, total: 0 });
+    setRunStats(null);
   }
 
   function confirmReviewerName() {
@@ -321,6 +336,7 @@ export default function Home() {
     setCopied(false);
     setClassifyError(null);
     setProgress({ done: 0, total: hashtags.length });
+    setRunStats(null);
 
     const batches = [];
     for (let i = 0; i < hashtags.length; i += BATCH_SIZE) {
@@ -329,6 +345,8 @@ export default function Home() {
 
     let allResults = [];
     let anyBatchFailed = false;
+    let researchCount = 0;
+    const runStartedAt = Date.now();
 
     try {
       for (const batch of batches) {
@@ -345,6 +363,7 @@ export default function Home() {
           if (!res.ok) throw new Error(`Server returned ${res.status}`);
           const data = await res.json();
           allResults = allResults.concat(data.results || []);
+          researchCount += data.meta?.researchCount || 0;
         } catch (err) {
           // Don't let one bad/slow batch hang the whole run or silently lose
           // its hashtags — mark them as failed rows (visible, retriable) and
@@ -362,6 +381,8 @@ export default function Home() {
         }
         setProgress((p) => ({ ...p, done: Math.min(p.done + batch.length, p.total) }));
       }
+
+      setRunStats({ total: hashtags.length, researchCount, elapsedMs: Date.now() - runStartedAt });
 
       // Each request above only saw its own slice, so re-run the batch-wide
       // consistency check across the full merged set of results now.
@@ -428,6 +449,15 @@ export default function Home() {
     setEditedFlags((prev) => prev.filter((_, i) => i !== rowIndex));
   }
 
+  // Inserts one new blank row directly below rowIndex — for a case the
+  // matcher/AI missed entirely (no row produced for it at all), rather than
+  // needing to re-run the whole batch just to add one segment by hand.
+  function insertRowAfter(rowIndex) {
+    const blankRow = HEADER.map(() => "");
+    setRows((prev) => [...prev.slice(0, rowIndex + 1), blankRow, ...prev.slice(rowIndex + 1)]);
+    setEditedFlags((prev) => [...prev.slice(0, rowIndex + 1), false, ...prev.slice(rowIndex + 1)]);
+  }
+
   async function handleExport() {
     const res = await fetch("/api/export", {
       method: "POST",
@@ -474,6 +504,7 @@ export default function Home() {
     setShowNewOnly(false);
     setView("classify");
     setCurrentHistoryId(data.batch.id);
+    setRunStats(null);
   }
 
   async function deleteHistoryEntry(id) {
@@ -662,6 +693,11 @@ export default function Home() {
                     {accuracyPct}% accuracy
                   </span>
                 )}
+                {runStats && (
+                  <span className="badge" title="How many hashtags in this run needed AI research, and how long the whole run took">
+                    {runStats.researchCount}/{runStats.total} needed AI research · {formatDuration(runStats.elapsedMs)}
+                  </span>
+                )}
               </div>
 
               <div className="table-toolbar">
@@ -683,6 +719,7 @@ export default function Home() {
                 <table className="grid">
                   <thead>
                     <tr>
+                      <th></th>
                       {HEADER.map((h) => (
                         <th key={h}>{h}</th>
                       ))}
@@ -694,6 +731,15 @@ export default function Home() {
                       const row = rows[i];
                       return (
                         <tr key={i} className={isInconsistentRow(row) ? "inconsistent" : ""}>
+                          <td className="row-actions">
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => insertRowAfter(i)}
+                              title="Insert a new row below"
+                            >
+                              +
+                            </button>
+                          </td>
                           {row.map((cell, j) => {
                             if (j === INCLUSION_COL_INDEX) {
                               const valueClass =
@@ -959,18 +1005,19 @@ export default function Home() {
                         <span className="mistake-log-hashtag">{m.hashtag}</span>
                         <span className={`mistake-badge mtag-${m.tag}`}>{mistakeTagLabel(m.tag)}</span>
                         <span className="mistake-log-reviewer">{m.reviewer}</span>
-                        <span className="mistake-log-original-hint">(AI originally classified as)</span>
                       </div>
-                      <div className="mistake-log-original">{formatClassificationSummary(m.originalClassification)}</div>
-                      {m.changes.length > 0 && (
-                        <ul className="mistake-log-changes">
-                          {m.changes.map((c, i) => (
-                            <li key={i}>
-                              <strong>{c.field}:</strong> {c.from || "(blank)"} → {c.to || "(blank)"}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
+                      <table className="mistake-compare-table">
+                        <tbody>
+                          <tr>
+                            <th>AI</th>
+                            <td>{formatClassificationSummary(m.originalClassification)}</td>
+                          </tr>
+                          <tr>
+                            <th>수정됨</th>
+                            <td>{formatClassificationSummary(m.currentClassification)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
                     </div>
                   ))}
                 </div>

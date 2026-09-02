@@ -3,6 +3,23 @@ import { matchSegment } from "../../../lib/matcher";
 import { researchNewEntity } from "../../../lib/claudeResearch";
 import { reconcileConsistency } from "../../../lib/consistency";
 
+// Emoji embedded in a hashtag (e.g. a flag emoji) has no taxonomy meaning
+// and was causing garbled classification when matching/research tried to
+// interpret it as literal content - strip it deterministically before any
+// matching starts, rather than leaving it to the AI to guess whether/how to
+// read it. \p{Extended_Pictographic} covers pictographic emoji without also
+// matching plain digits (unlike the broader \p{Emoji} property, which would
+// wrongly strip characters like "2" out of a hashtag such as "#2in1makeup").
+// Regional-indicator flag pairs (e.g. the US flag) aren't Extended_Pictographic,
+// so they're matched separately by their code point range; ‍ (zero-width
+// joiner) and ️ (variation selector-16) are stripped too since they
+// often glue multi-part emoji (like a flag) together with other characters.
+const EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}\p{Extended_Pictographic}\u200D\uFE0F]/gu;
+
+function stripEmoji(text) {
+  return text.replace(EMOJI_RE, "");
+}
+
 // Tries the hashtag as a single combined phrase first (per the "don't
 // default to smallest units" rule) via exact match / stem / abbreviation.
 // Hashtags that need real word-segmentation (e.g. "dfwblackhair" -> "dfw" +
@@ -83,7 +100,7 @@ async function mapWithConcurrency(items, limit, fn) {
 // can't take down the whole batch or leave the request hanging — it becomes
 // its own reviewable "error" row instead.
 async function resolveHashtagInner(hashtag, useResearch, deadlineAt) {
-  const segment = hashtag.replace(/^#/, "");
+  const segment = stripEmoji(hashtag.replace(/^#/, ""));
   const match = await matchSegment(segment);
 
   if (match.status !== "needs_research") {
@@ -150,12 +167,30 @@ export async function POST(request) {
 
   const cleaned = hashtags.map((raw) => raw.trim()).filter(Boolean);
 
+  const startedAt = Date.now();
   const perHashtagRows = await mapWithConcurrency(cleaned, CONCURRENCY, (hashtag) =>
     resolveHashtag(hashtag, useResearch)
   );
+  const elapsedMs = Date.now() - startedAt;
   const results = perHashtagRows.flat();
+
+  // A hashtag "needed AI research" if any row it produced came back from
+  // matchSegment() with status "needs_research" - counted per-hashtag (not
+  // per-row) since one hashtag can produce multiple rows. Logged server-side
+  // (visible in Vercel's function logs) and returned to the client so a
+  // whole run's totals can be shown in the UI - this is the only place that
+  // actually knows both numbers, since the free-tier matcher and the AI
+  // research step are otherwise opaque to whoever's waiting on the batch.
+  const researchCount = perHashtagRows.filter((rows) => rows.some((r) => r.status === "needs_research")).length;
+  console.log(
+    `[classify] batch of ${cleaned.length} (${researchCount} needed AI research) took ${elapsedMs}ms`
+  );
 
   const { results: reconciled, flags } = reconcileConsistency(results);
 
-  return NextResponse.json({ results: reconciled, consistencyFlags: flags });
+  return NextResponse.json({
+    results: reconciled,
+    consistencyFlags: flags,
+    meta: { total: cleaned.length, researchCount, elapsedMs },
+  });
 }
