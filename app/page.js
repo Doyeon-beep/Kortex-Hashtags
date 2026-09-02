@@ -22,10 +22,13 @@ const MISTAKE_TAGS = [
   { value: "cat_missing", label: "Should have proposed new cat5" },
   { value: "brand_wrong", label: "Brand wrong" },
   { value: "brand_missing", label: "Brand missing (exists but not found)" },
+  { value: "brand_should_be_new", label: "Should have proposed new brand" },
   { value: "product_line_wrong", label: "Product line wrong" },
   { value: "product_line_missing", label: "Product line missing" },
+  { value: "pl_should_be_new", label: "Should have proposed new PL" },
   { value: "inclusion_wrong", label: "Include/exclude wrong" },
   { value: "segmentation_wrong", label: "Hashtag split wrong" },
+  { value: "segment_missing", label: "Segment missing (had to add a row)" },
   { value: "other", label: "Other" },
 ];
 
@@ -43,10 +46,13 @@ const MISTAKE_TAG_DOT_COLORS = {
   cat_missing: "#8a6d00",
   brand_wrong: "#6b3fa0",
   brand_missing: "#5a2ea6",
+  brand_should_be_new: "#3730a3",
   product_line_wrong: "#0f766e",
   product_line_missing: "#0e6ba8",
+  pl_should_be_new: "#4d7c0f",
   inclusion_wrong: "#a3155e",
   segmentation_wrong: "#157a3d",
+  segment_missing: "#9a3412",
   other: "#5b5b66",
 };
 
@@ -54,19 +60,21 @@ const MISTAKE_TAG_DOT_COLORS = {
 // above) — used to widen just those columns in the Results table.
 const CAT_COLS_END_INDEX = 6; // product_line
 
-// A quick "cat1 › cat2 › ... · brand: X · product line: Y · include" summary
-// of a full row snapshot, used to show what the AI originally produced
-// alongside the reviewer's correction in the Data Quality mistake log.
-function formatClassificationSummary(o) {
-  if (!o) return "(no classification)";
-  const path = [o.cat1, o.cat2, o.cat3, o.cat4, o.cat5].filter(Boolean).join(" › ");
-  const extras = [];
-  if (o.brand) extras.push(`brand: ${o.brand}`);
-  if (o.productLine) extras.push(`product line: ${o.productLine}`);
-  if (o.inclusion) extras.push(o.inclusion);
-  const parts = [path, ...extras].filter(Boolean);
-  return parts.length ? parts.join(" · ") : "(no classification)";
-}
+// Columns shown in the Data Quality mistake log's AI-vs-Corrected compare
+// table - same fields as the Results table (minus hashtag, already shown
+// separately above this table, and comments/mistake type, not relevant to
+// a before/after comparison).
+const COMPARE_COLUMNS = [
+  { key: "cat1", label: "cat1" },
+  { key: "cat2", label: "cat2" },
+  { key: "cat3", label: "cat3" },
+  { key: "cat4", label: "cat4" },
+  { key: "cat5", label: "cat5" },
+  { key: "brand", label: "brand" },
+  { key: "productLine", label: "product_line" },
+  { key: "inclusion", label: "inclusion" },
+  { key: "newLabel", label: "new" },
+];
 
 function isInconsistentRow(row) {
   return String(row[COMMENTS_COL_INDEX] || "").includes("Consistency check needed");
@@ -1007,14 +1015,26 @@ export default function Home() {
                         <span className="mistake-log-reviewer">{m.reviewer}</span>
                       </div>
                       <table className="mistake-compare-table">
+                        <thead>
+                          <tr>
+                            <th></th>
+                            {COMPARE_COLUMNS.map((c) => (
+                              <th key={c.key}>{c.label}</th>
+                            ))}
+                          </tr>
+                        </thead>
                         <tbody>
                           <tr>
                             <th>AI</th>
-                            <td>{formatClassificationSummary(m.originalClassification)}</td>
+                            {COMPARE_COLUMNS.map((c) => (
+                              <td key={c.key}>{m.originalClassification?.[c.key] || ""}</td>
+                            ))}
                           </tr>
                           <tr>
-                            <th>수정됨</th>
-                            <td>{formatClassificationSummary(m.currentClassification)}</td>
+                            <th>Corrected</th>
+                            {COMPARE_COLUMNS.map((c) => (
+                              <td key={c.key}>{m.currentClassification?.[c.key] || ""}</td>
+                            ))}
                           </tr>
                         </tbody>
                       </table>

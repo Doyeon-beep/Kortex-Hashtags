@@ -1,20 +1,6 @@
 import { NextResponse } from "next/server";
 import { sql, parseJsonColumn } from "../../../lib/db";
 
-// cat1..comments, in the same order as batches.original_rows / batch_rows'
-// current columns (excluding hashtag, which never changes on a correction).
-const DIFF_FIELDS = [
-  { index: 0, column: "cat1", label: "cat1" },
-  { index: 1, column: "cat2", label: "cat2" },
-  { index: 2, column: "cat3", label: "cat3" },
-  { index: 3, column: "cat4", label: "cat4" },
-  { index: 4, column: "cat5", label: "cat5" },
-  { index: 5, column: "brand", label: "brand" },
-  { index: 6, column: "product_line", label: "product line" },
-  { index: 8, column: "inclusion", label: "inclusion" },
-  { index: 9, column: "new_label", label: "new" },
-];
-
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const reviewer = searchParams.get("reviewer");
@@ -92,11 +78,6 @@ export async function GET(request) {
         row.inclusion,
         row.new_label,
       ];
-      const changes = DIFF_FIELDS.filter((f) => (original[f.index] || "") !== (current[f.index] || "")).map((f) => ({
-        field: f.label,
-        from: original[f.index] || "",
-        to: current[f.index] || "",
-      }));
       const originalClassification = {
         cat1: original[0] || "",
         cat2: original[1] || "",
@@ -106,6 +87,7 @@ export async function GET(request) {
         brand: original[5] || "",
         productLine: original[6] || "",
         inclusion: original[8] || "",
+        newLabel: original[9] || "",
       };
       const currentClassification = {
         cat1: current[0] || "",
@@ -116,13 +98,13 @@ export async function GET(request) {
         brand: current[5] || "",
         productLine: current[6] || "",
         inclusion: current[8] || "",
+        newLabel: current[9] || "",
       };
       return {
         id: row.id,
         hashtag: row.hashtag,
         tag: row.mistake_tag,
         reviewer: row.reviewer,
-        changes,
         originalClassification,
         currentClassification,
       };
